@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test reCAPTCHA v3</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test reCAPTCHA v3</h1>
+    <form id="testForm">
+        <div class="form-group">
+            <label for="name">Nom:</label>
+            <input type="text" id="name" name="name" required>
+        </div>
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <button type="submit">Envoyer</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+        // Charger la clé de site depuis le serveur, puis charger dynamiquement l'API reCAPTCHA
+        let SITE_KEY = null;
+        let recaptchaLoaded = false;
+
+        function loadRecaptchaScript(key) {
+            return new Promise((resolve, reject) => {
+                if (recaptchaLoaded) return resolve();
+                const s = document.createElement('script');
+                s.src = `https://www.google.com/recaptcha/api.js?render=${key}`;
+                s.async = true;
+                s.defer = true;
+                s.onload = () => {
+                    recaptchaLoaded = true;
+                    resolve();
+                };
+                s.onerror = () => reject(new Error('Impossible de charger le script reCAPTCHA'));
+                document.head.appendChild(s);
+            });
+        }
+
+        // Récupérer la clé de site depuis /config
+        fetch('/config')
+            .then(r => r.json())
+            .then(({ siteKey }) => {
+                SITE_KEY = siteKey;
+                if (SITE_KEY) {
+                    return loadRecaptchaScript(SITE_KEY);
+                } else {
+                    throw new Error('RECAPTCHA_SITE_KEY non défini côté serveur');
+                }
+            })
+            .catch(err => {
+                console.error('Erreur lors du chargement de la clé reCAPTCHA:', err);
+                const resultDiv = document.getElementById('result');
+                resultDiv.innerHTML = 'Erreur: clé reCAPTCHA non disponible';
+                resultDiv.className = 'error';
+            });
+
+        document.getElementById('testForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            if (!SITE_KEY || !recaptchaLoaded) {
+                const resultDiv = document.getElementById('result');
+                resultDiv.innerHTML = 'reCAPTCHA non prêt. Réessayez dans un instant.';
+                resultDiv.className = 'error';
+                return;
+            }
+
+            grecaptcha.execute(SITE_KEY, {action: 'submit'})
+                .then(function(token) {
+                    // Envoyer le token au serveur pour vérification
+                    return fetch('/verify-recaptcha', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ token: token })
+                    });
+                })
+                .then(response => response.json())
+                .then(data => {
+                    const resultDiv = document.getElementById('result');
+                    if (data.success && data.score > 0.5) {
+                        resultDiv.innerHTML = `Succès! Score: ${data.score}`;
+                        resultDiv.className = 'success';
+                        // Ici vous pouvez continuer avec l'envoi du formulaire
+                    } else {
+                        resultDiv.innerHTML = 'Échec de la vérification reCAPTCHA';
+                        resultDiv.className = 'error';
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    const resultDiv = document.getElementById('result');
+                    resultDiv.innerHTML = 'Erreur lors de la vérification';
+                    resultDiv.className = 'error';
+                });
+        });
+    </script>
+</body>
+</html>
